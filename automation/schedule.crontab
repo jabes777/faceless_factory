@@ -1,0 +1,9 @@
+# Faceless Factory — fully local cron scheduler (alternative to n8n)
+# Install:  crontab -e   then paste the line below (adjust path to python3 if needed).
+# Produces one video package Mon–Fri at 9:00am, logs to output/cron.log.
+# In live mode (keys in .env + token.json) this can also render + upload end-to-end.
+
+0 9 * * 1-5 cd /Users/manny/Downloads/AI_MD_Files/faceless_factory && /usr/bin/python3 run.py >> output/cron.log 2>&1
+
+# Batch-build a week of content every Sunday night (10 videos):
+0 20 * * 0 cd /Users/manny/Downloads/AI_MD_Files/faceless_factory && /usr/bin/python3 run.py --batch 10 >> output/cron.log 2>&1

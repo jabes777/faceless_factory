@@ -1,0 +1,8 @@
+# Dry-run needs NOTHING (pure stdlib). Install these only for real-API mode.
+anthropic>=0.40
+openai>=1.50
+requests>=2.31
+google-api-python-client>=2.140
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2
+# ffmpeg must be installed separately (brew install ffmpeg) for local assembly.

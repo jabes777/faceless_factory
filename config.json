@@ -1,0 +1,52 @@
+{
+  "channel": {
+    "name": "Dinero con Propósito",
+    "handle": "@DineroConProposito",
+    "language": "es",
+    "niche": "personal finance + faith-aligned wealth-building for Latinas/Latinos",
+    "audience": "Latinas 28-48, bilingual, faith-rooted, want financial freedom without losing family/faith",
+    "format_container": "Cómo {resultado} sin perder tu fe, tu familia, ni tu paz",
+    "tone": "warm, direct, faith-rooted, practical (Gracia Urgente)",
+    "target_length_minutes": 9,
+    "uploads_per_week": 5
+  },
+  "voice": {
+    "provider": "elevenlabs",
+    "voice_id": "REPLACE_WITH_ELEVENLABS_VOICE_ID",
+    "model": "eleven_turbo_v2_5",
+    "language": "es",
+    "fallback_macos_say_voice": "Monica"
+  },
+  "script": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-8",
+    "words_per_minute": 150
+  },
+  "visuals": {
+    "stock_provider": "pexels",
+    "image_provider": "none",
+    "captions": true,
+    "aspect_ratio": "16:9"
+  },
+  "assemble": {
+    "renderer": "ffmpeg",
+    "resolution": "1920x1080",
+    "fps": 30,
+    "background_music": true
+  },
+  "seo": {
+    "max_title_chars": 70,
+    "tags_count": 18
+  },
+  "upload": {
+    "privacy_status": "private",
+    "category_id": "27",
+    "made_for_kids": false,
+    "self_certification_ai_disclosure": true
+  },
+  "compliance": {
+    "require_original_angle": true,
+    "min_unique_substance_score": 0.6,
+    "note": "July 2025 inauthentic-content policy: every episode must be materially varied with original framing."
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "name": "Faceless Factory — Daily Auto-Publish",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"field": "cronExpression", "expression": "0 13 * * 1-5"}]}},
+      "name": "Schedule (Mon-Fri 9am ET)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /Users/manny/Downloads/AI_MD_Files/faceless_factory && /usr/bin/python3 run.py"
+      },
+      "name": "Run Pipeline (script+voice+plan+metadata)",
+      "type": "n8n-nodes-base.executeCommand",
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.shotstack.io/v1/render",
+        "authentication": "genericCredentialType",
+        "sendBody": true,
+        "bodyParametersJson": "={{ $json.shotstack_plan }}"
+      },
+      "name": "Render Video (Shotstack)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [680, 300],
+      "notes": "Reads output/<slug>/render_shotstack.json. Poll render id until done, download mp4."
+    },
+    {
+      "parameters": {"resource": "video", "operation": "upload"},
+      "name": "Upload to YouTube",
+      "type": "n8n-nodes-base.youTube",
+      "position": [900, 300],
+      "notes": "Use snippet+status from output/<slug>/metadata.json. Set privacyStatus + containsSyntheticMedia."
+    },
+    {
+      "parameters": {"channel": "#content", "text": "=✅ Published: {{ $json.title }} — {{ $json.url }}"},
+      "name": "Notify",
+      "type": "n8n-nodes-base.slack",
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Schedule (Mon-Fri 9am ET)": {"main": [[{"node": "Run Pipeline (script+voice+plan+metadata)", "type": "main", "index": 0}]]},
+    "Run Pipeline (script+voice+plan+metadata)": {"main": [[{"node": "Render Video (Shotstack)", "type": "main", "index": 0}]]},
+    "Render Video (Shotstack)": {"main": [[{"node": "Upload to YouTube", "type": "main", "index": 0}]]},
+    "Upload to YouTube": {"main": [[{"node": "Notify", "type": "main", "index": 0}]]}
+  },
+  "settings": {},
+  "_comment": "Import into n8n (Workflows > Import from File). Add credentials for Shotstack, YouTube OAuth, and Slack. The Python pipeline does stages 0-3 + 5-6 locally; n8n handles render+upload+notify so you keep a human approval step before going public if desired."
+}
