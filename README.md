@@ -1,5 +1,10 @@
 # 🏭 Faceless Factory — Full-Automation YouTube Pipeline
 
+[![GitHub stars](https://img.shields.io/github/stars/jabes777/faceless_factory?style=flat-square)](https://github.com/jabes777/faceless_factory/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/jabes777/faceless_factory?style=flat-square)](https://github.com/jabes777/faceless_factory/commits/main)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+
 A runnable, niche-agnostic pipeline that turns a **topic** into a complete, **monetization-compliant** faceless-YouTube video package: original script → narration audio → visual storyboard + render plan → CTR thumbnail spec → SEO metadata → upload payload.
 
 Built from the strategy distilled in [`../Faceless_AI_YouTube_50_Channels_Analysis_And_Blueprint.md`](../Faceless_AI_YouTube_50_Channels_Analysis_And_Blueprint.md). Pre-configured for the recommended channel **"Dinero con Propósito"** (Spanish finance + faith), but you change one file (`config.json`) to run any niche/language.
