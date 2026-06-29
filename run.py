@@ -56,7 +56,7 @@ def make_one(config, topic):
     util.write_text(odir / "script.txt", scr["text"])
 
     vo = voice.generate(config, scr["text"], odir)
-    vis = visuals.generate(config, scr["text"])
+    vis = visuals.generate(config, scr["text"], topic=topic)
     util.write_json(odir / "storyboard.json", vis)
     asm = assemble.generate(config, vis["storyboard"], vo["audio_path"], odir,
                             srt_path=vo.get("srt_path"))

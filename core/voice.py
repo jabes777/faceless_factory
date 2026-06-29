@@ -48,7 +48,7 @@ def _audio_duration(audio_path):
         return None
 
 
-def _build_srt_proportional(text, total_sec, words_per_sub=5):
+def _build_srt_proportional(text, total_sec, words_per_sub=7):
     """Generate SRT by distributing subtitle chunks proportionally across the audio duration.
 
     Falls back when the TTS engine doesn't emit word-boundary events.

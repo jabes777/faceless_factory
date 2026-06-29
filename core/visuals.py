@@ -244,13 +244,15 @@ def _pexels_video_download(query, dest_path):
 
         for video in videos:
             files = video.get("video_files", [])
-            sd_files = [f for f in files if f.get("quality") == "sd" and f.get("width", 0) >= 640]
-            if not sd_files:
-                sd_files = [f for f in files if f.get("width", 0) >= 480]
-            if not sd_files:
+            # Prefer ~720p (width ≈ 1280) — looks sharp when upscaled to 1080p while
+            # keeping download fast. Avoid 4K (unnecessary) and sub-480p (blurry).
+            candidates = [f for f in files if 640 <= f.get("width", 0) <= 1920]
+            if not candidates:
+                candidates = [f for f in files if f.get("width", 0) >= 480]
+            if not candidates:
                 continue
-            sd_files.sort(key=lambda f: f.get("width", 0))
-            url = sd_files[0]["link"]  # smallest suitable file
+            candidates.sort(key=lambda f: abs(f.get("width", 0) - 1280))
+            url = candidates[0]["link"]  # closest to 720p
             resp = requests.get(url, headers={"User-Agent": headers["User-Agent"]},
                                 timeout=60, stream=True)
             resp.raise_for_status()
@@ -272,16 +274,21 @@ def _pexels_video_download(query, dest_path):
         return False
 
 
-def generate(config, script_text):
+def generate(config, script_text, topic=None):
     segs = _segments(script_text)
+    # Extract topic-level keywords — these are blended into every shot so clips stay
+    # on-theme even for paragraphs with generic words ("hablemos", "primero", etc.)
+    topic_kw = _keywords(topic) if topic else []
     storyboard = []
     for i, seg in enumerate(segs):
         kw = _keywords(seg)
+        # Topic keywords lead so _english_video_query() tries them first
+        combined = list(dict.fromkeys(topic_kw + kw))[:4]
         storyboard.append({
             "shot": i + 1,
             "narration_excerpt": seg[:120] + ("…" if len(seg) > 120 else ""),
-            "stock_query": " ".join(kw),
-            "image_prompt": f"cinematic, warm light, {', '.join(kw)}, no text, {config['visuals']['aspect_ratio']}",
+            "stock_query": " ".join(combined),
+            "image_prompt": f"cinematic, warm light, {', '.join(combined)}, no text, {config['visuals']['aspect_ratio']}",
             "on_screen_caption": config["visuals"]["captions"],
             "duration_hint_sec": max(6, round(len(seg.split()) / 2.5)),
         })

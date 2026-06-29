@@ -41,7 +41,7 @@ def _get_font(size):
 def _draw_subtitle(draw, width, height, caption, font):
     """Draw Netflix-style subtitle: 2 lines max, bottom-third, semi-transparent bar."""
     from PIL import Image, ImageDraw
-    lines = textwrap.wrap(caption, width=42)[:2]
+    lines = textwrap.wrap(caption, width=36)[:2]
     text = "\n".join(lines)
     if not font:
         return
@@ -74,7 +74,7 @@ def _make_slide_photo(width, height, photo_path, caption, out_path):
         gd.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
     img = Image.alpha_composite(img, gradient)
     draw = ImageDraw.Draw(img)
-    _draw_subtitle(draw, width, height, caption, _get_font(54))
+    _draw_subtitle(draw, width, height, caption, _get_font(64))
     img.convert("RGB").save(str(out_path), "PNG")
     return out_path
 
@@ -84,7 +84,7 @@ def _make_slide(width, height, color_rgb, caption, out_path):
     from PIL import Image, ImageDraw
     img = Image.new("RGBA", (width, height), (*color_rgb, 255))
     draw = ImageDraw.Draw(img)
-    _draw_subtitle(draw, width, height, caption, _get_font(54))
+    _draw_subtitle(draw, width, height, caption, _get_font(64))
     img.convert("RGB").save(str(out_path), "PNG")
     return out_path
 
@@ -94,7 +94,7 @@ def _make_subtitle_overlay(width, height, caption, out_path):
     from PIL import Image, ImageDraw
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    _draw_subtitle(draw, width, height, caption, _get_font(54))
+    _draw_subtitle(draw, width, height, caption, _get_font(64))
     img.save(str(out_path), "PNG")
 
 
@@ -237,10 +237,11 @@ def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
     """Encode a Pexels video clip to a fixed-duration segment with subtitle overlay.
 
     Scales the clip to fill the frame (Pexels videos are 16:9, same as our target),
-    then overlays the transparent subtitle PNG.
+    overlays the transparent subtitle PNG, then adds a 0.25 s fade in/out so shots
+    dip to black between cuts rather than hard-cutting.
     """
-    # Scale to fill frame exactly — Pexels clips are 16:9 so no stretch artifacts.
-    # setsar=1 corrects Sample Aspect Ratio flags some clips carry.
+    fade_d = 0.25
+    fade_out_start = max(0.0, dur - fade_d - 0.1)
     cmd = [
         ffmpeg, "-y",
         "-stream_loop", "-1", "-i", str(clip_path),
@@ -249,10 +250,12 @@ def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
         (
             f"[0:v]scale={w}:{h},setsar=1[bg];"
             f"[1:v]format=rgba[sub];"
-            f"[bg][sub]overlay=0:0[v]"
+            f"[bg][sub]overlay=0:0,"
+            f"fade=t=in:st=0:d={fade_d},"
+            f"fade=t=out:st={fade_out_start:.2f}:d={fade_d}[v]"
         ),
         "-map", "[v]",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-crf", "22", "-preset", "fast", "-pix_fmt", "yuv420p",
         "-t", str(dur), "-r", str(fps),
         seg_path,
     ]
@@ -261,11 +264,17 @@ def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
 
 
 def _encode_photo_segment(ffmpeg, png_path, w, h, fps, dur, seg_path):
-    """Encode a static PNG slide (photo or color) to a fixed-duration segment."""
+    """Encode a static PNG slide (photo or color) to a fixed-duration segment.
+
+    Adds a 0.25 s fade in/out matching the clip segment transitions.
+    """
+    fade_d = 0.25
+    fade_out_start = max(0.0, dur - fade_d - 0.1)
     cmd = [
         ffmpeg, "-y",
         "-loop", "1", "-i", str(png_path),
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-vf", f"fade=t=in:st=0:d={fade_d},fade=t=out:st={fade_out_start:.2f}:d={fade_d}",
+        "-c:v", "libx264", "-crf", "22", "-preset", "fast", "-pix_fmt", "yuv420p",
         "-t", str(dur), "-r", str(fps),
         seg_path,
     ]
@@ -342,18 +351,19 @@ def _render_local(config, storyboard, audio_path, odir):
 
     out_path = str(odir / "final.mp4")
     if have_music:
-        # Mix voice (100%) + lofi music (15%).
-        # normalize=0 prevents amix from silently halving both streams.
+        # -c:v copy: segments are already H.264; no re-encode needed, saves ~90 s.
+        # loudnorm: normalize voice to -16 LUFS (YouTube speech recommendation).
+        # normalize=0 on amix: prevents ffmpeg halving both streams by default.
         cmd = [
             ffmpeg, "-y",
             "-f", "concat", "-safe", "0", "-i", str(concat_list),
             "-i", audio_path,
             "-i", str(music_path),
             "-filter_complex",
-            "[1:a]volume=1.0[voice];[2:a]volume=0.15[music];"
+            "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[voice];[2:a]volume=0.15[music];"
             "[voice][music]amix=inputs=2:duration=first:normalize=0[audio]",
             "-map", "0:v", "-map", "[audio]",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:v", "copy",
             "-c:a", "aac", "-b:a", "192k",
             "-shortest", out_path,
         ]
@@ -362,7 +372,9 @@ def _render_local(config, storyboard, audio_path, odir):
             ffmpeg, "-y",
             "-f", "concat", "-safe", "0", "-i", str(concat_list),
             "-i", audio_path,
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-filter_complex", "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[audio]",
+            "-map", "0:v", "-map", "[audio]",
+            "-c:v", "copy",
             "-c:a", "aac", "-b:a", "192k",
             "-shortest", out_path,
         ]
