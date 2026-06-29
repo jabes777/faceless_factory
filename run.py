@@ -58,7 +58,8 @@ def make_one(config, topic):
     vo = voice.generate(config, scr["text"], odir)
     vis = visuals.generate(config, scr["text"])
     util.write_json(odir / "storyboard.json", vis)
-    asm = assemble.generate(config, vis["storyboard"], vo["audio_path"], odir)
+    asm = assemble.generate(config, vis["storyboard"], vo["audio_path"], odir,
+                            srt_path=vo.get("srt_path"))
     thumb = thumbnail.generate(config, idea, odir)
     meta = metadata.generate(config, idea, vis, odir)
 
@@ -70,6 +71,7 @@ def make_one(config, topic):
         "title_candidates": idea["title_candidates"], "compliance_ratio": ratio,
         "compliance_pass": ok, "word_count": scr["word_count"],
         "audio": vo["audio_path"], "ssml": vo["ssml_path"],
+        "srt": vo.get("srt_path"),
         "render": {"shotstack": asm["shotstack_plan"], "ffmpeg": asm["ffmpeg_script"],
                    "ffmpeg_available": asm["ffmpeg_available"]},
         "thumbnail_overlay": thumb["overlay_text"], "upload": up,
