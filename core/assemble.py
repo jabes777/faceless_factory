@@ -98,32 +98,115 @@ def _make_subtitle_overlay(width, height, caption, out_path):
     img.save(str(out_path), "PNG")
 
 
-def _generate_ambient_music(duration_sec, out_path, ffmpeg_bin):
-    """Generate royalty-free ambient background music using ffmpeg sine synthesis.
+def _generate_lofi_music(duration_sec, out_path, ffmpeg_bin):
+    """Generate royalty-free lofi ambient piano background music using numpy synthesis.
 
-    Produces a soft A-minor pentatonic pad with a pluck envelope that restarts every 3.5 s.
-    Uses floor arithmetic for the envelope period since ffmpeg's aevalsrc doesn't have mod().
-    Zero copyright — generated programmatically. YouTube monetization safe.
+    Style: slow lofi piano pad (72 BPM) — the signature sound of top viral YouTube
+    educational/inspirational channels (Lofi Girl, Kurzgesagt, Veritasium style).
+    Chord progression: Am7 → Fmaj7 → Cmaj7 → G7 (warm, hopeful, faith-forward).
+    Piano envelopes + subtle bass + natural reverb via delay summation.
+    Zero copyright — generated entirely from math. YouTube monetization safe.
     """
-    d = int(duration_sec) + 10
-    # Phase within each 3.5-second pluck period using floor: t - 3.5*floor(t/3.5)
-    ph = "(t-3.5*floor(t/3.5))"
-    expr = (
-        f"0.07*sin(2*PI*110*t)*exp(-{ph}*0.5)"
-        f"+0.05*sin(2*PI*165*t)*exp(-{ph}*0.5)"
-        f"+0.04*sin(2*PI*220*t)*exp(-{ph}*0.5)"
-        f"+0.02*sin(2*PI*261*t)*exp(-{ph}*0.5)"
-        f"+0.015*sin(2*PI*330*t)*exp(-{ph}*0.5)"
-    )
-    cmd = [
-        ffmpeg_bin, "-y", "-f", "lavfi",
-        "-i", f"aevalsrc={expr}:s=44100:d={d}",
-        "-af", "lowpass=f=800,highpass=f=55,volume=0.45",
-        "-ar", "44100", str(out_path),
-    ]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        util.log("assemble", f"music gen failed: {r.stderr[-150:]}")
+    try:
+        import numpy as np
+        import wave as _wave
+
+        sr = 44100
+        bpm = 72
+        beat_dur = 60.0 / bpm        # 0.833 s per beat
+        bar_dur = beat_dur * 4        # 3.333 s per bar
+
+        n = int(sr * (duration_sec + 4))  # extra 4 s for fade-out
+        audio = np.zeros(n, dtype=np.float64)
+
+        # 4-voice piano chords: Am7 → Fmaj7 → Cmaj7 → G7
+        chords = [
+            [220.00, 261.63, 329.63, 392.00],   # Am7:  A3 C4 E4 G4
+            [174.61, 220.00, 261.63, 329.63],   # Fmaj7: F3 A3 C4 E4
+            [261.63, 329.63, 392.00, 493.88],   # Cmaj7: C4 E4 G4 B4
+            [196.00, 246.94, 293.66, 349.23],   # G7:   G3 B3 D4 F4
+        ]
+        bass_roots = [110.00, 87.31, 130.81, 98.00]   # A2 F2 C3 G2
+
+        bars_total = int(n / sr / bar_dur) + 2
+
+        for bar_i in range(bars_total):
+            chord = chords[bar_i % 4]
+            start = int(bar_i * bar_dur * sr)
+            end = min(int((bar_i + 1) * bar_dur * sr), n)
+            if start >= n:
+                break
+            seg = end - start
+            t_seg = np.arange(seg, dtype=np.float64) / sr
+
+            # Piano envelope: 30 ms attack → exponential decay over the bar
+            atk = int(0.03 * sr)
+            env = np.empty(seg, dtype=np.float64)
+            env[:min(atk, seg)] = np.linspace(0.0, 1.0, min(atk, seg))
+            if seg > atk:
+                env[atk:] = np.exp(-np.arange(seg - atk, dtype=np.float64) / (0.9 * sr))
+
+            for freq in chord:
+                # Fundamental + 2nd + 3rd harmonic → piano warmth
+                # Slight detune on harmonics for organic "lofi" character
+                tone = (
+                    np.sin(2 * np.pi * freq * t_seg) * 0.65
+                    + np.sin(2 * np.pi * freq * 2.001 * t_seg) * 0.22
+                    + np.sin(2 * np.pi * freq * 3.002 * t_seg) * 0.13
+                )
+                audio[start:end] += tone * env * 0.055
+
+            # Bass note on beat 1 of each bar
+            root = bass_roots[bar_i % 4]
+            b_len = min(int(beat_dur * sr), n - start)
+            t_b = np.arange(b_len, dtype=np.float64) / sr
+            b_atk = int(0.015 * sr)
+            b_env = np.empty(b_len, dtype=np.float64)
+            b_env[:min(b_atk, b_len)] = np.linspace(0.0, 1.0, min(b_atk, b_len))
+            if b_len > b_atk:
+                b_env[b_atk:] = np.exp(-np.arange(b_len - b_atk, dtype=np.float64) / (0.35 * sr))
+            bass_tone = (
+                np.sin(2 * np.pi * root * t_b) * 0.65
+                + np.sin(2 * np.pi * root * 2 * t_b) * 0.25
+            )
+            audio[start:start + b_len] += bass_tone * b_env * 0.13
+
+        # Natural reverb: sum 3 delayed copies at decreasing gain
+        reverb = audio.copy()
+        for delay_ms, gain in [(28, 0.28), (55, 0.16), (110, 0.09)]:
+            d = int(delay_ms * sr / 1000)
+            reverb[d:] += audio[: n - d] * gain
+        audio = reverb
+
+        # Fade in (2 s) and fade out (3 s)
+        fi = min(int(2.0 * sr), n)
+        fo = min(int(3.0 * sr), n)
+        audio[:fi] *= np.linspace(0.0, 1.0, fi)
+        audio[-fo:] *= np.linspace(1.0, 0.0, fo)
+
+        # Normalize to −14 dBFS (leaves headroom for mixing under voice)
+        peak = np.max(np.abs(audio))
+        if peak > 0:
+            audio = audio / peak * 0.20
+
+        # Write 16-bit mono WAV, then convert to MP3 with ffmpeg
+        tmp_wav = Path(str(out_path)).with_suffix(".wav")
+        with _wave.open(str(tmp_wav), "w") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            wf.writeframes((audio * 32767).astype(np.int16).tobytes())
+
+        r = subprocess.run(
+            [ffmpeg_bin, "-y", "-i", str(tmp_wav), "-b:a", "192k", str(out_path)],
+            capture_output=True, text=True,
+        )
+        tmp_wav.unlink(missing_ok=True)
+        if r.returncode != 0:
+            util.log("assemble", f"music WAV→MP3 failed: {r.stderr[-100:]}")
+
+    except Exception as e:
+        util.log("assemble", f"lofi music gen failed ({e}), no background music")
 
 
 def _shotstack_json(config, storyboard, audio_path):
@@ -249,22 +332,22 @@ def _render_local(config, storyboard, audio_path, odir):
     concat_list = media_dir / "concat.txt"
     concat_list.write_text("\n".join(f"file '{p}'" for p in segment_paths), encoding="utf-8")
 
-    # Generate ambient background music (royalty-free, ffmpeg sine synthesis)
+    # Generate lofi ambient piano background music (numpy, zero copyright, YouTube safe)
     total_dur = sum(s["duration_hint_sec"] for s in storyboard)
     music_path = media_dir / "background_music.mp3"
-    _generate_ambient_music(total_dur, music_path, ffmpeg)
+    _generate_lofi_music(total_dur, music_path, ffmpeg)
     have_music = music_path.exists() and music_path.stat().st_size > 1000
 
     out_path = str(odir / "final.mp4")
     if have_music:
-        # Mix voice (100%) + ambient music (8%) — music barely audible, voice always clear
+        # Mix voice (100%) + lofi music (12%) — clearly audible but never competes with voice
         cmd = [
             ffmpeg, "-y",
             "-f", "concat", "-safe", "0", "-i", str(concat_list),
             "-i", audio_path,
             "-i", str(music_path),
             "-filter_complex",
-            "[1:a]volume=1.0[voice];[2:a]volume=0.08[music];"
+            "[1:a]volume=1.0[voice];[2:a]volume=0.12[music];"
             "[voice][music]amix=inputs=2:duration=first[audio]",
             "-map", "0:v", "-map", "[audio]",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
