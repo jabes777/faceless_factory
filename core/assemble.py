@@ -1,16 +1,89 @@
 """Stage 4 — Assembly. Emits Shotstack JSON + ffmpeg.sh, then renders final.mp4 locally
-when ffmpeg is available (using color-slide placeholders so no stock downloads are needed).
+when ffmpeg is available (using Pillow-generated caption slides so no stock downloads needed).
 """
 import shutil
 import subprocess
+import textwrap
 
 from . import util
 
 # Warm brand gradient palette — one color per shot (cycles if > 8 shots)
 _SLIDE_COLORS = [
-    "0x1a1a2e", "0x16213e", "0x0f3460", "0x533483",
-    "0x2d6a4f", "0x1b4332", "0x40916c", "0x52b788",
+    (26, 26, 46), (22, 33, 62), (15, 52, 96), (83, 52, 131),
+    (45, 106, 79), (27, 67, 50), (64, 145, 108), (82, 183, 136),
 ]
+
+# System fonts that render Spanish correctly on macOS
+_FONT_CANDIDATES = [
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/SFNS.ttf",
+    "/System/Library/Fonts/SFNSDisplay.ttf",
+]
+
+
+def _get_font(size):
+    try:
+        from PIL import ImageFont
+        for path in _FONT_CANDIDATES:
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+    except Exception:
+        return None
+
+
+def _draw_subtitle(draw, width, height, caption, font):
+    """Draw Netflix-style subtitle: 2 lines max, bottom-third, semi-transparent bar."""
+    from PIL import Image, ImageDraw
+    lines = textwrap.wrap(caption, width=42)[:2]
+    text = "\n".join(lines)
+    if not font:
+        return
+    bbox = draw.multiline_textbbox((0, 0), text, font=font, spacing=8)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    pad = 20
+    bar_y = height - th - pad * 2 - 60
+    # Semi-transparent black bar
+    bar = Image.new("RGBA", (tw + pad * 2 + 20, th + pad * 2), (0, 0, 0, 160))
+    x = (width - bar.width) // 2
+    draw._image.paste(bar, (x, bar_y), bar)
+    # Text
+    tx = (width - tw) // 2
+    draw.multiline_text((tx + 2, bar_y + pad + 2), text, font=font,
+                        fill=(0, 0, 0, 200), spacing=8, align="center")
+    draw.multiline_text((tx, bar_y + pad), text, font=font,
+                        fill=(255, 255, 255), spacing=8, align="center")
+
+
+def _make_slide_photo(width, height, photo_path, caption, out_path):
+    """Real photo bg + subtitle-style caption at the bottom."""
+    from PIL import Image, ImageDraw, ImageEnhance
+    img = Image.open(str(photo_path)).convert("RGBA")
+    img = img.resize((width, height), Image.LANCZOS)
+    # Slight darken only at the bottom for subtitle legibility
+    gradient = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(gradient)
+    for y in range(height // 2, height):
+        alpha = int(140 * (y - height // 2) / (height // 2))
+        gd.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
+    img = Image.alpha_composite(img, gradient)
+    draw = ImageDraw.Draw(img)
+    _draw_subtitle(draw, width, height, caption, _get_font(54))
+    img.convert("RGB").save(str(out_path), "PNG")
+    return out_path
+
+
+def _make_slide(width, height, color_rgb, caption, out_path):
+    """Color-bg slide + subtitle-style caption (fallback when no Pexels photo)."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (width, height), (*color_rgb, 255))
+    draw = ImageDraw.Draw(img)
+    _draw_subtitle(draw, width, height, caption, _get_font(54))
+    img.convert("RGB").save(str(out_path), "PNG")
+    return out_path
 
 
 def _shotstack_json(config, storyboard, audio_path):
@@ -50,18 +123,29 @@ def _render_local(config, storyboard, audio_path, odir):
     media_dir = odir / "media"
     media_dir.mkdir(exist_ok=True)
 
-    # Render each shot as a silent .mp4 color slide
+    # Generate PNG slides with Pillow (Pexels photo bg if key present, else color)
+    from core.visuals import _pexels_download
     segment_paths = []
     for i, shot in enumerate(storyboard):
-        color = _SLIDE_COLORS[i % len(_SLIDE_COLORS)]
+        color_rgb = _SLIDE_COLORS[i % len(_SLIDE_COLORS)]
         dur = shot["duration_hint_sec"]
+        caption = shot.get("narration_excerpt", "")
+        png_path = media_dir / f"shot_{i:02d}.png"
         seg_path = str(media_dir / f"shot_{i:02d}.mp4")
+
+        # Try Pexels photo background, fall back to color slide
+        stock_path = media_dir / f"stock_{i:02d}.jpg"
+        have_stock = _pexels_download(shot.get("stock_query", ""), stock_path)
+        if have_stock:
+            _make_slide_photo(int(w), int(h), stock_path, caption, png_path)
+        else:
+            _make_slide(int(w), int(h), color_rgb, caption, png_path)
+
         cmd = [
             ffmpeg, "-y",
-            "-f", "lavfi",
-            "-i", f"color=c={color}:s={w}x{h}:r={fps}:d={dur}",
+            "-loop", "1", "-i", str(png_path),
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-t", str(dur),
+            "-t", str(dur), "-r", str(fps),
             seg_path,
         ]
         r = subprocess.run(cmd, capture_output=True, text=True)

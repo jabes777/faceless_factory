@@ -71,30 +71,111 @@ def _openai(config, idea):
 
 
 def _dry(config, idea):
-    """Deterministic, demonstrative script so the pipeline runs with zero keys."""
+    """Full-length dry-run script (~1,350 words / 9 min) with proper hook → body → CTA structure."""
     topic = idea["topic"]
     name = config["channel"]["name"]
+    audience = config["channel"]["audience"]
     return (
-        f"¿Y si te dijera que la razón por la que {topic} se siente imposible no es la falta de "
-        f"dinero… sino una sola decisión que estás evitando? Quédate, porque al final te voy a dar "
-        f"el primer paso exacto que puedes dar hoy.\n\n"
-        f"Bienvenida a {name}. Hoy no vamos a hablar de teoría. Vamos a hablar de tu vida real: tu "
-        f"familia, tu fe, y la paz que mereces mientras construyes tu libertad financiera.\n\n"
-        f"Primero, la verdad incómoda. La mayoría de los consejos sobre {topic} fueron escritos para "
-        f"alguien que no se parece a ti. No toman en cuenta la culpa de querer más, la presión de la "
-        f"familia, ni el miedo de perder quién eres. Por eso no funcionan.\n\n"
-        f"Paso uno: nombra el número. No el sueño, el número exacto que necesitas este mes. Lo que no "
-        f"se mide, no se transforma.\n\n"
-        f"Paso dos: elige una sola fuente de fuga. Una suscripción, una deuda, un hábito. Ciérrala "
-        f"esta semana. Una victoria concreta cambia tu identidad más que diez metas abstractas.\n\n"
-        f"Paso tres: aparta el diez por ciento antes de gastar, no después. Esto no es un truco "
-        f"financiero; es un acto de fe en tu propio futuro.\n\n"
-        f"Recuerda: Dios no te llamó a encogerte. Te llamó a ser completa, clara, y fructífera. "
-        f"Puedes prosperar sin perder tu suavidad, tu fe, ni los valores de tu familia.\n\n"
-        f"Si esto te habló hoy, suscríbete y deja en los comentarios cuál de los tres pasos vas a "
-        f"dar primero. Nos vemos en el próximo video.\n\n"
-        f"[DRY-RUN DRAFT — add an API key in .env to generate a full ~"
-        f"{config['script']['words_per_minute'] * config['channel']['target_length_minutes']}-word original script.]"
+        # HOOK — first 30 sec, open the curiosity loop
+        f"¿Y si la razón por la que {topic} se siente imposible "
+        f"no tiene nada que ver con el dinero? Quédate, porque en los próximos minutos te voy a mostrar "
+        f"exactamente por qué, y el primer paso concreto que puedes dar hoy — aunque tu cuenta bancaria "
+        f"no lo refleje todavía.\n\n"
+
+        f"Esto no es un video de motivación vacía. Es una lección específica, diseñada para ti: una mujer "
+        f"que equilibra su fe, su familia, y su deseo de libertad financiera sin traicionar quién es. "
+        f"Bienvenida a {name}.\n\n"
+
+        # CONTEXTO — por qué este tema importa ahora
+        f"Hablemos primero de por qué {topic} es tan difícil. No es porque te falte disciplina. "
+        f"No es porque seas mala con el dinero. Es porque la mayoría de los consejos financieros fueron "
+        f"escritos por personas que no se parecen a ti, para situaciones que no son las tuyas. Ignoraron "
+        f"la presión familiar, la culpa de querer más, el peso de la cultura, y sobre todo — tu fe. "
+        f"Eso cambia hoy.\n\n"
+
+        f"Hace tres años, una mujer llamada Carmen — madre de dos hijos, trabajadora de tiempo completo, "
+        f"profundamente creyente — me dijo: 'Sé que Dios quiere prosperidad para mí, pero cada vez que "
+        f"intento avanzar, algo o alguien me detiene.' Lo que Carmen no sabía era que el obstáculo no "
+        f"estaba afuera. Estaba en una sola creencia que nadie le había desafiado. Cuando la identificamos "
+        f"y la reemplazamos, todo cambió en noventa días. Hoy te comparto lo que aprendió ella.\n\n"
+
+        # CUERPO — tres pasos concretos
+        f"Paso uno: nombra el número real, no el sueño.\n\n"
+
+        f"La mayoría de nosotras tenemos metas financieras vagas. 'Quiero ahorrar más.' "
+        f"'Quiero salir de deudas.' 'Quiero tener estabilidad.' Pero lo vago no se puede medir, "
+        f"y lo que no se mide no cambia. El cerebro necesita especificidad para activarse. "
+        f"Esta semana, escribe el número exacto: cuánto debes, cuánto necesitas ahorrar este mes, "
+        f"cuánto pagarás en deuda esta quincena. No el número ideal. El número real, el de hoy. "
+        f"Ese es el punto de partida. Sin punto de partida no hay camino.\n\n"
+
+        f"Carmen hizo este ejercicio y descubrió que tenía cuatro deudas pequeñas que juntas sumaban "
+        f"más de lo que pensaba — pero que podía liquidar la más pequeña en tres semanas. Esa primera "
+        f"victoria le cambió la identidad. Dejó de verse como alguien atrapada y empezó a verse como "
+        f"alguien que avanza. La identidad siempre precede al comportamiento.\n\n"
+
+        f"Paso dos: cierra una sola fuente de fuga esta semana.\n\n"
+
+        f"No te pido que transformes toda tu economía de golpe. Eso no funciona y genera culpa. "
+        f"Te pido una sola cosa: identifica la fuente de gasto más fácil de eliminar esta semana. "
+        f"Una suscripción que olvidaste. Una compra por ansiedad que se repite. Una transferencia "
+        f"a alguien que en realidad no necesita tu dinero ahora mismo. Solo una. Ciérrala. "
+        f"No porque seas tacaña — sino porque cada peso que desvías hacia tu libertad financiera "
+        f"es un acto de amor propio y de fe en tu futuro.\n\n"
+
+        f"La neurociencia del hábito nos dice que una victoria pequeña y concreta activa el circuito "
+        f"de recompensa más que una meta grande y distante. No subestimes lo que parece pequeño. "
+        f"Veinte dólares al mes parecen nada. En un año son doscientos cuarenta. En cinco años, "
+        f"invertidos con un rendimiento moderado, son más de mil quinientos. El tiempo es el "
+        f"ingrediente que nadie menciona en los consejos financieros de redes sociales.\n\n"
+
+        f"Paso tres: aparta primero, gasta después — y trátalo como un acto de fe.\n\n"
+
+        f"Hay una práctica que aparece en casi todas las tradiciones de sabiduría financiera — "
+        f"y también en la fe cristiana: dar y apartar antes de gastar, no después. El diezmo no "
+        f"es solo un principio espiritual. Es un sistema de priorización. Cuando apartas el diez "
+        f"por ciento de cualquier ingreso — antes de pagar nada más — le estás diciendo a tu cerebro "
+        f"que tú eres la primera prioridad. Que tu futuro importa. Que tienes suficiente para "
+        f"prosperar y ser generosa.\n\n"
+
+        f"Esto no es un truco de mentalidad. Es una instrucción de acción: abre una cuenta de "
+        f"ahorro separada — muchos bancos lo permiten gratis — y configura una transferencia "
+        f"automática el día que recibes tu ingreso. Aunque sea el cinco por ciento al principio. "
+        f"El porcentaje importa menos que el hábito. El hábito importa más que el monto.\n\n"
+
+        # PROFUNDIDAD — dimensión de fe
+        f"Ahora quiero hablar de algo que pocas personas dicen en los videos de finanzas personales: "
+        f"el componente espiritual de {topic}.\n\n"
+
+        f"Si tu fe es parte de tu vida — y para muchas de ustedes lo es profundamente — entonces "
+        f"separar lo financiero de lo espiritual no solo es artificial, es contraproducente. "
+        f"La Biblia habla de administración, de generosidad, de no servir a dos señores. "
+        f"No te está pidiendo que seas pobre. Te está pidiendo que seas íntegra — que tus "
+        f"decisiones financieras estén alineadas con tus valores más profundos.\n\n"
+
+        f"Cuando sientes culpa por querer más, pregúntate: ¿es esta culpa de Dios, o es de la "
+        f"cultura? ¿Te enseñaron que el dinero es sucio, que querer prosperar es vanidad, que "
+        f"una mujer buena no habla de dinero? Esas creencias tienen origen cultural y familiar — "
+        f"no espiritual. Dios no te llamó a vivir estresada. Te llamó a ser buena administradora "
+        f"de lo que te dio. Eso requiere claridad financiera, no ignorancia.\n\n"
+
+        # ACCIÓN INMEDIATA
+        f"Antes de cerrar este video, quiero que hagas una sola cosa. Solo una. Abre una hoja de "
+        f"papel — o tu aplicación de notas — y escribe tres números: el total de lo que debes hoy, "
+        f"el ingreso que esperas este mes, y el monto mínimo que podrías apartar esta semana. "
+        f"No tiene que ser perfecto. Solo tiene que ser real.\n\n"
+
+        f"Esos tres números son tu punto de partida. No tu condena. Tu punto de partida. "
+        f"Y desde un punto de partida claro, cualquier camino es posible.\n\n"
+
+        # CTA
+        f"Si este video te habló hoy, suscríbete a {name} — publicamos cada semana una lección "
+        f"específica, práctica, y con raíces en la fe para mujeres que quieren prosperar sin "
+        f"perder su paz, su familia, ni sus valores. Y déjame saber en los comentarios: "
+        f"¿cuál de los tres pasos vas a dar esta semana? Leo cada comentario. "
+        f"Nos vemos en el próximo video.\n\n"
+
+        f"[DRAFT — agrega ANTHROPIC_API_KEY en .env para un guion 100% original de Claude.]"
     )
 
 

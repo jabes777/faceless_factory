@@ -15,7 +15,7 @@
     "voice_id": "REPLACE_WITH_ELEVENLABS_VOICE_ID",
     "model": "eleven_turbo_v2_5",
     "language": "es",
-    "fallback_macos_say_voice": "Monica"
+    "fallback_macos_say_voice": "Paulina"
   },
   "script": {
     "provider": "anthropic",
