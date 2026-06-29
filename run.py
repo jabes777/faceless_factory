@@ -59,7 +59,7 @@ def make_one(config, topic):
     vis = visuals.generate(config, scr["text"], topic=topic)
     util.write_json(odir / "storyboard.json", vis)
     asm = assemble.generate(config, vis["storyboard"], vo["audio_path"], odir,
-                            srt_path=vo.get("srt_path"))
+                            srt_path=vo.get("srt_path"), topic=topic)
     thumb = thumbnail.generate(config, idea, odir)
     meta = metadata.generate(config, idea, vis, odir)
 

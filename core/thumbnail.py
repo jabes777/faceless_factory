@@ -39,44 +39,85 @@ def _fetch_background(topic, odir):
 
 
 def _make_thumbnail_png(title, overlay_text, bg_path, out_path):
-    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+    from PIL import Image, ImageDraw, ImageEnhance
     import textwrap as tw
 
     if bg_path and Path(bg_path).exists():
         img = Image.open(str(bg_path)).convert("RGB")
         img = img.resize((_W, _H), Image.LANCZOS)
-        img = ImageEnhance.Brightness(img).enhance(0.35)
-        # Gradient overlay (left side darker for text)
+        img = ImageEnhance.Brightness(img).enhance(0.28)
+        # Full vignette: dark edges, slightly lighter center
         overlay = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))
         draw_ov = ImageDraw.Draw(overlay)
-        for x in range(_W // 2):
-            alpha = int(180 * (1 - x / (_W // 2)))
+        for y in range(_H):
+            alpha = int(100 * (y / _H))
+            draw_ov.line([(0, y), (_W, y)], fill=(0, 0, 0, alpha))
+        for x in range(_W // 3):
+            alpha = int(160 * (1 - x / (_W // 3)))
             draw_ov.line([(x, 0), (x, _H)], fill=(0, 0, 0, alpha))
         img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     else:
-        img = Image.new("RGB", (_W, _H), (15, 52, 96))
+        # Rich vertical gradient: deep navy top → dark teal bottom
+        img = Image.new("RGB", (_W, _H))
+        draw_bg = ImageDraw.Draw(img)
+        for y in range(_H):
+            r = int(10 + (15 - 10) * y / _H)
+            g = int(14 + (52 - 14) * y / _H)
+            b = int(40 + (96 - 40) * y / _H)
+            draw_bg.line([(0, y), (_W, y)], fill=(r, g, b))
 
     draw = ImageDraw.Draw(img)
 
-    # Channel label (small, top-left)
-    small_font = _get_font(32)
-    if small_font:
-        draw.text((60, 50), "Dinero con Propósito", font=small_font, fill=(255, 200, 80))
+    # --- Gold brand bar across the top ---
+    draw.rectangle([(0, 0), (_W, 9)], fill=(255, 180, 0))
 
-    # Main hook text (large, centered-left)
-    hook_font = _get_font(88)
-    lines = tw.wrap(overlay_text, width=14)[:3]
-    y = _H // 2 - len(lines) * 55
+    # --- Channel label (small, top-left, gold) ---
+    small_font = _get_font(34)
+    if small_font:
+        draw.text((52, 24), "DINERO CON PROPÓSITO", font=small_font, fill=(255, 200, 80))
+
+    # --- Main hook text — large, CENTERED, 2 lines max ---
+    hook_font = _get_font(112)
+    lines = tw.wrap(overlay_text, width=13)[:2]
+    line_h = 130
+    total_h = len(lines) * line_h
+    y = (_H - total_h) // 2 - 18  # slightly above center
+
     for line in lines:
         if hook_font:
-            # Shadow
-            draw.text((62, y + 4), line, font=hook_font, fill=(0, 0, 0, 200))
-            draw.text((60, y), line, font=hook_font, fill=(255, 255, 255))
-        y += 110
+            try:
+                bbox = draw.textbbox((0, 0), line, font=hook_font)
+            except Exception:
+                bbox = (0, 0, len(line) * 60, 100)
+            tw_px = bbox[2] - bbox[0]
+            x = (_W - tw_px) // 2
+            # Multi-pass shadow/outline (8 directions)
+            for ox, oy in [(-5, -5), (5, -5), (-5, 5), (5, 5),
+                            (0, 6), (6, 0), (-6, 0), (0, -6)]:
+                draw.text((x + ox, y + oy), line, font=hook_font, fill=(0, 0, 0))
+            # White main text
+            draw.text((x, y), line, font=hook_font, fill=(255, 255, 255))
+        y += line_h
 
-    # Accent bar
-    draw.rectangle([(55, _H - 100), (55 + len(overlay_text) * 28, _H - 88)],
-                   fill=(255, 180, 0))
+    # --- Gold accent bar centered below text ---
+    bar_w = 440
+    bar_h = 11
+    bar_x = (_W - bar_w) // 2
+    bar_y = y + 12
+    draw.rectangle([(bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h)], fill=(255, 180, 0))
+
+    # --- Subtitle line (channel + CTA) at bottom ---
+    cta_font = _get_font(28)
+    if cta_font:
+        cta_text = "▶  Mira el video completo  •  @DineroConProposito"
+        try:
+            bbox = draw.textbbox((0, 0), cta_text, font=cta_font)
+            cta_w = bbox[2] - bbox[0]
+        except Exception:
+            cta_w = len(cta_text) * 16
+        cx = (_W - cta_w) // 2
+        draw.text((cx + 1, _H - 48 + 1), cta_text, font=cta_font, fill=(0, 0, 0))
+        draw.text((cx, _H - 48), cta_text, font=cta_font, fill=(200, 200, 200))
 
     img.save(str(out_path), "JPEG", quality=95)
     return out_path
@@ -97,7 +138,7 @@ def generate(config, idea, odir):
             "max_words": 4,
             "font": "bold condensed sans (Anton / Montserrat ExtraBold)",
             "color": "#FFFFFF with #1A1A1A stroke",
-            "position": "left third, vertically centered",
+            "position": "centered, 2 lines max",
         },
         "ab_variants": 2,
     }

@@ -76,7 +76,10 @@ def _dry(config, idea):
     name = config["channel"]["name"]
     audience = config["channel"]["audience"]
     return (
-        # HOOK — first 30 sec, open the curiosity loop
+        # [HOOK] — first 7 seconds: shocking stat + bold claim + curiosity loop
+        # Structure: STAT → BOLD CLAIM → QUESTION → PROMISE (proven viral pattern)
+        f"El 73% de las latinas admite que gasta más de lo que gana — y la mayoría no sabe por qué. "
+        f"Eso no es falta de disciplina. Es falta de información. "
         f"¿Y si la razón por la que {topic} se siente imposible "
         f"no tiene nada que ver con el dinero? Quédate, porque en los próximos minutos te voy a mostrar "
         f"exactamente por qué, y el primer paso concreto que puedes dar hoy — aunque tu cuenta bancaria "

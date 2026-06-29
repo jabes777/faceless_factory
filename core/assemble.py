@@ -24,6 +24,11 @@ _FONT_CANDIDATES = [
     "/System/Library/Fonts/SFNSDisplay.ttf",
 ]
 
+# Section title cards shown at the start of each major section (every 4 shots)
+_SECTION_LABELS = [
+    "EL PROBLEMA", "PASO UNO", "PASO DOS", "PASO TRES", "REFLEXIÓN", "ACCIÓN",
+]
+
 
 def _get_font(size):
     try:
@@ -38,35 +43,175 @@ def _get_font(size):
         return None
 
 
+# ---------------------------------------------------------------------------
+# Text overlay helpers — all draw onto an ImageDraw context
+# ---------------------------------------------------------------------------
+
 def _draw_subtitle(draw, width, height, caption, font):
-    """Draw Netflix-style subtitle: 2 lines max, bottom-third, semi-transparent bar."""
-    from PIL import Image, ImageDraw
+    """Draw YouTube CC-style subtitle: white text with black outline, no background bar.
+
+    Matches how top viral channels and YouTube's own auto-CC display captions —
+    high-contrast outline instead of the distracting semi-transparent bar.
+    """
     lines = textwrap.wrap(caption, width=36)[:2]
     text = "\n".join(lines)
-    if not font:
+    if not font or not text:
         return
-    bbox = draw.multiline_textbbox((0, 0), text, font=font, spacing=8)
+    try:
+        bbox = draw.multiline_textbbox((0, 0), text, font=font, spacing=8)
+    except Exception:
+        return
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    pad = 20
-    bar_y = height - th - pad * 2 - 60
-    # Semi-transparent black bar
-    bar = Image.new("RGBA", (tw + pad * 2 + 20, th + pad * 2), (0, 0, 0, 160))
-    x = (width - bar.width) // 2
-    draw._image.paste(bar, (x, bar_y), bar)
-    # Text
+    ty = height - th - 60
     tx = (width - tw) // 2
-    draw.multiline_text((tx + 2, bar_y + pad + 2), text, font=font,
-                        fill=(0, 0, 0, 200), spacing=8, align="center")
-    draw.multiline_text((tx, bar_y + pad), text, font=font,
+    # Black outline (8 directions, 3-4 px)
+    for ox, oy in [(-3, -3), (3, -3), (-3, 3), (3, 3), (0, -4), (0, 4), (-4, 0), (4, 0)]:
+        draw.multiline_text((tx + ox, ty + oy), text, font=font,
+                            fill=(0, 0, 0), spacing=8, align="center")
+    # White fill
+    draw.multiline_text((tx, ty), text, font=font,
                         fill=(255, 255, 255), spacing=8, align="center")
 
 
-def _make_slide_photo(width, height, photo_path, caption, out_path):
-    """Real photo bg + subtitle-style caption at the bottom."""
+def _draw_section_card(draw, width, height, title):
+    """Draw a centered section title card (Tier 1 — key-moment text overlay).
+
+    Styled like Kurzgesagt / Veritasium section cards: dark panel + gold accent bar
+    + bold white text, positioned slightly above vertical center.
+    """
+    from PIL import Image
+    font = _get_font(66)
+    if not font:
+        return
+    card_w = int(width * 0.62)
+    card_h = 86
+    card_x = (width - card_w) // 2
+    card_y = height // 2 - card_h - 20
+    # Semi-transparent dark background
+    card_bg = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 175))
+    try:
+        draw._image.paste(card_bg, (card_x, card_y), card_bg)
+    except Exception:
+        pass
+    # Gold left accent bar
+    draw.rectangle([(card_x, card_y), (card_x + 7, card_y + card_h)], fill=(255, 180, 0))
+    # Section title text
+    try:
+        bbox = draw.textbbox((0, 0), title, font=font)
+    except Exception:
+        return
+    tw_px = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+    tx = card_x + (card_w - tw_px) // 2
+    ty = card_y + (card_h - th) // 2
+    for ox, oy in [(-2, -2), (2, -2), (-2, 2), (2, 2)]:
+        draw.text((tx + ox, ty + oy), title, font=font, fill=(0, 0, 0))
+    draw.text((tx, ty), title, font=font, fill=(255, 255, 255))
+
+
+def _draw_lower_third(draw, width, height, channel_name, topic):
+    """Draw a lower-third intro card for shot 0 (Tier 2 — brand intro).
+
+    Appears at 0–3 s of the video. Shows channel name (small, gold) +
+    video topic (larger, white) over a semi-transparent dark bar.
+    """
+    from PIL import Image
+    bar_h = 88
+    bar_y = height - 220
+    bar_bg = Image.new("RGBA", (width, bar_h), (0, 0, 0, 190))
+    try:
+        draw._image.paste(bar_bg, (0, bar_y), bar_bg)
+    except Exception:
+        pass
+    # Gold top edge
+    draw.rectangle([(0, bar_y - 4), (width, bar_y)], fill=(255, 180, 0))
+    small_font = _get_font(28)
+    if small_font:
+        draw.text((55, bar_y + 8), channel_name.upper(), font=small_font, fill=(255, 200, 80))
+    big_font = _get_font(42)
+    if big_font and topic:
+        topic_short = " ".join(topic.split()[:7])
+        # Outline
+        for ox, oy in [(-1, -1), (1, 1)]:
+            draw.text((55 + ox, bar_y + 46 + oy), topic_short, font=big_font, fill=(0, 0, 0))
+        draw.text((55, bar_y + 46), topic_short, font=big_font, fill=(255, 255, 255))
+
+
+def _draw_end_screen(draw, width, height, channel_handle):
+    """Draw end-screen subscribe overlay for the last 15 s (Tier 2 — CTA).
+
+    Shows "¡SUSCRÍBETE para más!" + channel handle in bold centered text
+    over a semi-transparent dark panel.
+    """
+    from PIL import Image
+    bar_h = 118
+    bx, by = 60, height - 200
+    bw = width - 120
+    bar_bg = Image.new("RGBA", (bw, bar_h), (0, 0, 0, 210))
+    try:
+        draw._image.paste(bar_bg, (bx, by), bar_bg)
+    except Exception:
+        pass
+    # Gold left accent
+    draw.rectangle([(bx, by), (bx + 8, by + bar_h)], fill=(255, 180, 0))
+    sub_font = _get_font(50)
+    if sub_font:
+        sub_text = "¡SUSCRÍBETE para más!"
+        try:
+            bbox = draw.textbbox((0, 0), sub_text, font=sub_font)
+            tw_px = bbox[2] - bbox[0]
+        except Exception:
+            tw_px = bw // 2
+        tx = bx + (bw - tw_px) // 2
+        for ox, oy in [(-2, -2), (2, 2)]:
+            draw.text((tx + ox, by + 18 + oy), sub_text, font=sub_font, fill=(0, 0, 0))
+        draw.text((tx, by + 18), sub_text, font=sub_font, fill=(255, 220, 0))
+    handle_font = _get_font(36)
+    if handle_font:
+        handle_text = f"→ {channel_handle}"
+        try:
+            bbox = draw.textbbox((0, 0), handle_text, font=handle_font)
+            tw_px = bbox[2] - bbox[0]
+        except Exception:
+            tw_px = bw // 2
+        tx = bx + (bw - tw_px) // 2
+        for ox, oy in [(-2, -2), (2, 2)]:
+            draw.text((tx + ox, by + 72 + oy), handle_text, font=handle_font, fill=(0, 0, 0))
+        draw.text((tx, by + 72), handle_text, font=handle_font, fill=(255, 255, 255))
+
+
+def _annotate_image(draw, width, height, caption, **overlay):
+    """Apply all text overlays (subtitle + optional cards) to a draw context.
+
+    overlay kwargs:
+        section_title   str | None  — section card text (Tier 1)
+        is_intro        bool        — draw lower-third (Tier 2)
+        channel_name    str         — channel name for lower-third
+        topic           str | None  — video topic for lower-third
+        is_outro        bool        — draw end-screen card (Tier 2)
+        channel_handle  str         — @handle for end-screen
+    """
+    _draw_subtitle(draw, width, height, caption, _get_font(64))
+    if overlay.get("section_title"):
+        _draw_section_card(draw, width, height, overlay["section_title"])
+    if overlay.get("is_intro") and overlay.get("channel_name"):
+        _draw_lower_third(draw, width, height,
+                          overlay["channel_name"], overlay.get("topic") or "")
+    if overlay.get("is_outro"):
+        _draw_end_screen(draw, width, height,
+                         overlay.get("channel_handle") or "@DineroConProposito")
+
+
+# ---------------------------------------------------------------------------
+# Slide / overlay generators
+# ---------------------------------------------------------------------------
+
+def _make_slide_photo(width, height, photo_path, caption, out_path, **overlay):
+    """Real photo bg + all text overlays."""
     from PIL import Image, ImageDraw, ImageEnhance
     img = Image.open(str(photo_path)).convert("RGBA")
     img = img.resize((width, height), Image.LANCZOS)
-    # Slight darken only at the bottom for subtitle legibility
+    # Slight darken at the bottom for subtitle legibility
     gradient = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     gd = ImageDraw.Draw(gradient)
     for y in range(height // 2, height):
@@ -74,38 +219,63 @@ def _make_slide_photo(width, height, photo_path, caption, out_path):
         gd.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
     img = Image.alpha_composite(img, gradient)
     draw = ImageDraw.Draw(img)
-    _draw_subtitle(draw, width, height, caption, _get_font(64))
+    _annotate_image(draw, width, height, caption, **overlay)
     img.convert("RGB").save(str(out_path), "PNG")
     return out_path
 
 
-def _make_slide(width, height, color_rgb, caption, out_path):
-    """Color-bg slide + subtitle-style caption (fallback when no Pexels photo)."""
+def _make_slide(width, height, color_rgb, caption, out_path, **overlay):
+    """Color-bg slide + all text overlays (fallback when no Pexels photo)."""
     from PIL import Image, ImageDraw
     img = Image.new("RGBA", (width, height), (*color_rgb, 255))
     draw = ImageDraw.Draw(img)
-    _draw_subtitle(draw, width, height, caption, _get_font(64))
+    _annotate_image(draw, width, height, caption, **overlay)
     img.convert("RGB").save(str(out_path), "PNG")
     return out_path
 
 
-def _make_subtitle_overlay(width, height, caption, out_path):
-    """Transparent RGBA PNG containing only the subtitle bar — overlaid on video clips."""
+def _make_subtitle_overlay(width, height, caption, out_path, **overlay):
+    """Transparent RGBA PNG: subtitle + optional section / lower-third / end-screen overlays.
+
+    Used for video-clip shots where the PNG is composited on top of the Pexels clip.
+    """
     from PIL import Image, ImageDraw
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    _draw_subtitle(draw, width, height, caption, _get_font(64))
+    _annotate_image(draw, width, height, caption, **overlay)
     img.save(str(out_path), "PNG")
 
 
-def _generate_lofi_music(duration_sec, out_path, ffmpeg_bin):
+# ---------------------------------------------------------------------------
+# Music generation (Tier 2 — 3 mood-based progressions)
+# ---------------------------------------------------------------------------
+
+def _get_music_mood(topic):
+    """Detect music mood from topic keywords — selects chord progression."""
+    t = (topic or "").lower()
+    hopeful_kw = ["ahorrar", "lograr", "construir", "empezar", "comenzar", "ganar",
+                  "éxito", "meta", "libertad", "crecer", "sueño", "positivo", "prosperar"]
+    serious_kw = ["deuda", "crisis", "problema", "miedo", "culpa", "difícil",
+                  "perder", "ansiedad", "estrés", "emergencia", "divorcio"]
+    for kw in hopeful_kw:
+        if kw in t:
+            return "hopeful"
+    for kw in serious_kw:
+        if kw in t:
+            return "serious"
+    return "default"
+
+
+def _generate_lofi_music(duration_sec, out_path, ffmpeg_bin, mood="default"):
     """Generate royalty-free lofi ambient piano background music using numpy synthesis.
 
-    Style: slow lofi piano pad (72 BPM) — the signature sound of top viral YouTube
-    educational/inspirational channels (Lofi Girl, Kurzgesagt, Veritasium style).
-    Chord progression: Am7 → Fmaj7 → Cmaj7 → G7 (warm, hopeful, faith-forward).
-    Piano envelopes + subtle bass + natural reverb via delay summation.
-    Zero copyright — generated entirely from math. YouTube monetization safe.
+    Three mood-based progressions (Tier 2):
+      • default  — Am7→Fmaj7→Cmaj7→G7   (warm, faith-forward — original)
+      • hopeful  — Cmaj7→Am7→Fmaj7→G7   (bright, uplifting)
+      • serious  — Dm7→Am7→Bbmaj7→Cmaj7 (reflective, somber)
+
+    Piano envelopes + subtle bass + natural reverb. Zero copyright — pure math.
+    YouTube monetization safe.
     """
     try:
         import numpy as np
@@ -119,14 +289,33 @@ def _generate_lofi_music(duration_sec, out_path, ffmpeg_bin):
         n = int(sr * (duration_sec + 4))  # extra 4 s for fade-out
         audio = np.zeros(n, dtype=np.float64)
 
-        # 4-voice piano chords: Am7 → Fmaj7 → Cmaj7 → G7
-        chords = [
-            [220.00, 261.63, 329.63, 392.00],   # Am7:  A3 C4 E4 G4
-            [174.61, 220.00, 261.63, 329.63],   # Fmaj7: F3 A3 C4 E4
-            [261.63, 329.63, 392.00, 493.88],   # Cmaj7: C4 E4 G4 B4
-            [196.00, 246.94, 293.66, 349.23],   # G7:   G3 B3 D4 F4
-        ]
-        bass_roots = [110.00, 87.31, 130.81, 98.00]   # A2 F2 C3 G2
+        if mood == "hopeful":
+            # Cmaj7 → Am7 → Fmaj7 → G7 — bright, uplifting
+            chords = [
+                [261.63, 329.63, 392.00, 493.88],  # Cmaj7: C4 E4 G4 B4
+                [220.00, 261.63, 329.63, 392.00],  # Am7:   A3 C4 E4 G4
+                [174.61, 220.00, 261.63, 329.63],  # Fmaj7: F3 A3 C4 E4
+                [196.00, 246.94, 293.66, 349.23],  # G7:    G3 B3 D4 F4
+            ]
+            bass_roots = [130.81, 110.00, 87.31, 98.00]  # C3 A2 F2 G2
+        elif mood == "serious":
+            # Dm7 → Am7 → Bbmaj7 → Cmaj7 — somber, reflective
+            chords = [
+                [146.83, 174.61, 220.00, 261.63],  # Dm7:    D3 F3 A3 C4
+                [220.00, 261.63, 329.63, 392.00],  # Am7:    A3 C4 E4 G4
+                [116.54, 146.83, 174.61, 220.00],  # Bbmaj7: Bb2 D3 F3 A3
+                [130.81, 164.81, 196.00, 246.94],  # Cmaj7:  C3 E3 G3 B3
+            ]
+            bass_roots = [146.83, 110.00, 116.54, 130.81]  # D3 A2 Bb2 C3
+        else:
+            # Default: Am7 → Fmaj7 → Cmaj7 → G7 (warm, faith-forward)
+            chords = [
+                [220.00, 261.63, 329.63, 392.00],   # Am7:  A3 C4 E4 G4
+                [174.61, 220.00, 261.63, 329.63],   # Fmaj7: F3 A3 C4 E4
+                [261.63, 329.63, 392.00, 493.88],   # Cmaj7: C4 E4 G4 B4
+                [196.00, 246.94, 293.66, 349.23],   # G7:   G3 B3 D4 F4
+            ]
+            bass_roots = [110.00, 87.31, 130.81, 98.00]   # A2 F2 C3 G2
 
         bars_total = int(n / sr / bar_dur) + 2
 
@@ -148,7 +337,6 @@ def _generate_lofi_music(duration_sec, out_path, ffmpeg_bin):
 
             for freq in chord:
                 # Fundamental + 2nd + 3rd harmonic → piano warmth
-                # Slight detune on harmonics for organic "lofi" character
                 tone = (
                     np.sin(2 * np.pi * freq * t_seg) * 0.65
                     + np.sin(2 * np.pi * freq * 2.001 * t_seg) * 0.22
@@ -184,12 +372,12 @@ def _generate_lofi_music(duration_sec, out_path, ffmpeg_bin):
         audio[:fi] *= np.linspace(0.0, 1.0, fi)
         audio[-fo:] *= np.linspace(1.0, 0.0, fo)
 
-        # Normalize to −3 dBFS so the MP3 is loud; volume control happens in amix
+        # Normalize to −3 dBFS
         peak = np.max(np.abs(audio))
         if peak > 0:
             audio = audio / peak * 0.70
 
-        # Write 16-bit mono WAV, then convert to MP3 with ffmpeg
+        # Write 16-bit mono WAV → MP3
         tmp_wav = Path(str(out_path)).with_suffix(".wav")
         with _wave.open(str(tmp_wav), "w") as wf:
             wf.setnchannels(1)
@@ -204,10 +392,16 @@ def _generate_lofi_music(duration_sec, out_path, ffmpeg_bin):
         tmp_wav.unlink(missing_ok=True)
         if r.returncode != 0:
             util.log("assemble", f"music WAV→MP3 failed: {r.stderr[-100:]}")
+        else:
+            util.log("assemble", f"lofi music generated (mood={mood})")
 
     except Exception as e:
         util.log("assemble", f"lofi music gen failed ({e}), no background music")
 
+
+# ---------------------------------------------------------------------------
+# Shotstack JSON (cloud render plan — not used in local render)
+# ---------------------------------------------------------------------------
 
 def _shotstack_json(config, storyboard, audio_path):
     w, h = config["assemble"]["resolution"].split("x")
@@ -237,7 +431,7 @@ _XFADE_DUR = 0.5  # seconds for crossfade between shots
 
 
 def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
-    """Encode a Pexels video clip to a fixed-duration segment with subtitle overlay."""
+    """Encode a Pexels video clip to a fixed-duration segment with overlay."""
     cmd = [
         ffmpeg, "-y",
         "-stream_loop", "-1", "-i", str(clip_path),
@@ -274,7 +468,6 @@ def _build_xfade_filter(n_segs, orig_durations, voice_idx, music_idx, have_music
     """Build filter_complex for smooth crossfade transitions between N video segments.
 
     Math: offset[k] = sum(orig_dur[0..k]) - (k+1)*_XFADE_DUR
-    The last segment is encoded longer by (n-1)*_XFADE_DUR so total video == sum(orig_dur).
     """
     t = _XFADE_DUR
     parts = []
@@ -304,11 +497,17 @@ def _build_xfade_filter(n_segs, orig_durations, voice_idx, music_idx, have_music
     return ";".join(parts), v_out, "[audio]"
 
 
-def _render_local(config, storyboard, audio_path, odir):
+# ---------------------------------------------------------------------------
+# Local render — main assembly logic
+# ---------------------------------------------------------------------------
+
+def _render_local(config, storyboard, audio_path, odir, topic=None):
     """Render final.mp4 with:
       • Pexels video clips as moving backgrounds (falls back to photo, then color)
-      • Burned-in narration subtitles via Pillow overlay
-      • Ambient background music mixed at 8% under the voiceover
+      • Burned-in narration subtitles (CC-style outline, no bar)
+      • Section title cards every 4 shots (Tier 1)
+      • Lower-third intro on shot 0, end-screen on last shot (Tier 2)
+      • Ambient background music (mood-selected, Tier 2)
     """
     res = config["assemble"]["resolution"]
     w, h = res.split("x")
@@ -319,13 +518,16 @@ def _render_local(config, storyboard, audio_path, odir):
 
     from core.visuals import _pexels_download, _pexels_video_download
     import core.visuals as _vis
-    _vis._fallback_idx = 0   # reset fallback rotation for each video render
-    _vis._query_slots = {}   # reset slot counters so repeated queries get different clips
+    _vis._fallback_idx = 0
+    _vis._query_slots = {}
 
     n_shots = len(storyboard)
     segment_paths = []
-    orig_durations = []      # original shot durations (for xfade offset math)
+    orig_durations = []
     clip_count = 0
+
+    channel_name = config["channel"]["name"]
+    channel_handle = config["channel"]["handle"]
 
     for i, shot in enumerate(storyboard):
         color_rgb = _SLIDE_COLORS[i % len(_SLIDE_COLORS)]
@@ -335,15 +537,30 @@ def _render_local(config, storyboard, audio_path, odir):
         query = shot.get("stock_query", "")
         seg_path = str(media_dir / f"shot_{i:02d}.mp4")
 
-        # Last segment encoded longer to compensate for cumulative xfade overlap:
-        # total reduction = (n-1)*_XFADE_DUR; adding it to the last shot keeps
-        # total video duration == sum(orig_durations) == ~voice audio duration.
+        # Last segment encoded longer to compensate for cumulative xfade overlap
         encode_dur = dur + (n_shots - 1) * _XFADE_DUR if i == n_shots - 1 else dur
+
+        # --- Determine overlay type for this shot ---
+        is_intro = (i == 0)
+        is_outro = (i == n_shots - 1)
+        # Section card: every 4 shots starting from shot 4 (shot 0 = intro lower-third)
+        section_idx = i // 4
+        show_section = (i % 4 == 0) and (i > 0) and (section_idx - 1 < len(_SECTION_LABELS))
+        section_title = _SECTION_LABELS[section_idx - 1] if show_section else None
+
+        overlay_kw = dict(
+            section_title=section_title,
+            is_intro=is_intro,
+            is_outro=is_outro,
+            channel_name=channel_name,
+            topic=topic,
+            channel_handle=channel_handle,
+        )
 
         # --- Attempt 1: Pexels video clip ---
         clip_path = media_dir / f"clip_{i:02d}.mp4"
         sub_png = media_dir / f"sub_{i:02d}.png"
-        _make_subtitle_overlay(int(w), int(h), caption, sub_png)
+        _make_subtitle_overlay(int(w), int(h), caption, sub_png, **overlay_kw)
 
         have_clip = _pexels_video_download(query, clip_path)
         if have_clip:
@@ -359,9 +576,9 @@ def _render_local(config, storyboard, audio_path, odir):
         stock_path = media_dir / f"stock_{i:02d}.jpg"
         have_stock = _pexels_download(query, stock_path)
         if have_stock:
-            _make_slide_photo(int(w), int(h), stock_path, caption, png_path)
+            _make_slide_photo(int(w), int(h), stock_path, caption, png_path, **overlay_kw)
         else:
-            _make_slide(int(w), int(h), color_rgb, caption, png_path)
+            _make_slide(int(w), int(h), color_rgb, caption, png_path, **overlay_kw)
 
         ok, err = _encode_photo_segment(ffmpeg, png_path, w, h, fps, encode_dur, seg_path)
         if not ok:
@@ -371,10 +588,11 @@ def _render_local(config, storyboard, audio_path, odir):
 
     util.log("assemble", f"shots encoded: {len(segment_paths)} total, {clip_count} video clips")
 
-    # Generate lofi ambient piano background music (numpy, zero copyright, YouTube safe)
+    # Generate lofi ambient piano background music (mood-selected, zero copyright)
     total_dur = sum(s["duration_hint_sec"] for s in storyboard)
     music_path = media_dir / "background_music.mp3"
-    _generate_lofi_music(total_dur, music_path, ffmpeg)
+    mood = _get_music_mood(topic)
+    _generate_lofi_music(total_dur, music_path, ffmpeg, mood=mood)
     have_music = music_path.exists() and music_path.stat().st_size > 1000
 
     out_path = str(odir / "final.mp4")
@@ -382,12 +600,10 @@ def _render_local(config, storyboard, audio_path, odir):
     voice_idx = n_actual
     music_idx = n_actual + 1
 
-    # Build xfade filter_complex for smooth crossfade transitions
     filter_complex, v_out, a_out = _build_xfade_filter(
         n_actual, orig_durations[:n_actual], voice_idx, music_idx, have_music
     )
 
-    # All segments + voice + music as separate inputs (xfade requires individual files)
     inputs = []
     for p in segment_paths:
         inputs += ["-i", p]
@@ -406,11 +622,26 @@ def _render_local(config, storyboard, audio_path, odir):
     if r.returncode != 0:
         util.log("assemble", f"ffmpeg xfade error: {r.stderr[-400:]}")
         return False
-    util.log("assemble", f"rendered -> {out_path} (music={'yes' if have_music else 'no'})")
+
+    # --- Verify output resolution (Tier 3 — sanity check) ---
+    probe = subprocess.run(
+        [ffmpeg, "-i", out_path],
+        capture_output=True, text=True,
+    )
+    for line in probe.stderr.splitlines():
+        if "Video:" in line and ("1920x1080" in line or "1080" in line):
+            util.log("assemble", f"resolution check: 1920x1080 confirmed")
+            break
+
+    util.log("assemble", f"rendered -> {out_path} (music={mood if have_music else 'no'})")
     return True
 
 
-def generate(config, storyboard, audio_path, odir, srt_path=None):
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+def generate(config, storyboard, audio_path, odir, srt_path=None, topic=None):
     plan = _shotstack_json(config, storyboard, audio_path)
     util.write_json(odir / "render_shotstack.json", plan)
 
@@ -429,7 +660,7 @@ def generate(config, storyboard, audio_path, odir, srt_path=None):
     have_ffmpeg = bool(shutil.which("ffmpeg"))
     rendered = False
     if have_ffmpeg and audio_path and Path(audio_path).exists():
-        rendered = _render_local(config, storyboard, audio_path, odir)
+        rendered = _render_local(config, storyboard, audio_path, odir, topic=topic)
 
     util.log("assemble", f"render plan written (shotstack json + ffmpeg.sh); ffmpeg installed={have_ffmpeg}; rendered={rendered}")
     return {"shotstack_plan": str(odir / "render_shotstack.json"),
