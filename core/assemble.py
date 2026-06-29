@@ -233,15 +233,11 @@ def _shotstack_json(config, storyboard, audio_path):
     }
 
 
-def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
-    """Encode a Pexels video clip to a fixed-duration segment with subtitle overlay.
+_XFADE_DUR = 0.5  # seconds for crossfade between shots
 
-    Scales the clip to fill the frame (Pexels videos are 16:9, same as our target),
-    overlays the transparent subtitle PNG, then adds a 0.25 s fade in/out so shots
-    dip to black between cuts rather than hard-cutting.
-    """
-    fade_d = 0.25
-    fade_out_start = max(0.0, dur - fade_d - 0.1)
+
+def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
+    """Encode a Pexels video clip to a fixed-duration segment with subtitle overlay."""
     cmd = [
         ffmpeg, "-y",
         "-stream_loop", "-1", "-i", str(clip_path),
@@ -250,9 +246,7 @@ def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
         (
             f"[0:v]scale={w}:{h},setsar=1[bg];"
             f"[1:v]format=rgba[sub];"
-            f"[bg][sub]overlay=0:0,"
-            f"fade=t=in:st=0:d={fade_d},"
-            f"fade=t=out:st={fade_out_start:.2f}:d={fade_d}[v]"
+            f"[bg][sub]overlay=0:0[v]"
         ),
         "-map", "[v]",
         "-c:v", "libx264", "-crf", "22", "-preset", "fast", "-pix_fmt", "yuv420p",
@@ -264,22 +258,50 @@ def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
 
 
 def _encode_photo_segment(ffmpeg, png_path, w, h, fps, dur, seg_path):
-    """Encode a static PNG slide (photo or color) to a fixed-duration segment.
-
-    Adds a 0.25 s fade in/out matching the clip segment transitions.
-    """
-    fade_d = 0.25
-    fade_out_start = max(0.0, dur - fade_d - 0.1)
+    """Encode a static PNG slide (photo or color) to a fixed-duration segment."""
     cmd = [
         ffmpeg, "-y",
         "-loop", "1", "-i", str(png_path),
-        "-vf", f"fade=t=in:st=0:d={fade_d},fade=t=out:st={fade_out_start:.2f}:d={fade_d}",
         "-c:v", "libx264", "-crf", "22", "-preset", "fast", "-pix_fmt", "yuv420p",
         "-t", str(dur), "-r", str(fps),
         seg_path,
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     return r.returncode == 0, r.stderr
+
+
+def _build_xfade_filter(n_segs, orig_durations, voice_idx, music_idx, have_music):
+    """Build filter_complex for smooth crossfade transitions between N video segments.
+
+    Math: offset[k] = sum(orig_dur[0..k]) - (k+1)*_XFADE_DUR
+    The last segment is encoded longer by (n-1)*_XFADE_DUR so total video == sum(orig_dur).
+    """
+    t = _XFADE_DUR
+    parts = []
+
+    if n_segs <= 1:
+        v_out = "[0:v]"
+    else:
+        prev = "[0:v]"
+        cum = 0.0
+        for k in range(n_segs - 1):
+            cum += orig_durations[k]
+            offset = max(0.0, cum - (k + 1) * t)
+            label = f"[xv{k+1}]" if k < n_segs - 2 else "[vout]"
+            parts.append(
+                f"{prev}[{k+1}:v]xfade=transition=fade:duration={t:.2f}:offset={offset:.3f}{label}"
+            )
+            prev = label
+        v_out = "[vout]"
+
+    if have_music:
+        parts.append(f"[{voice_idx}:a]loudnorm=I=-16:TP=-1.5:LRA=11[voice]")
+        parts.append(f"[{music_idx}:a]volume=0.15[music]")
+        parts.append(f"[voice][music]amix=inputs=2:duration=first:normalize=0[audio]")
+    else:
+        parts.append(f"[{voice_idx}:a]loudnorm=I=-16:TP=-1.5:LRA=11[audio]")
+
+    return ";".join(parts), v_out, "[audio]"
 
 
 def _render_local(config, storyboard, audio_path, odir):
@@ -297,16 +319,26 @@ def _render_local(config, storyboard, audio_path, odir):
 
     from core.visuals import _pexels_download, _pexels_video_download
     import core.visuals as _vis
-    _vis._fallback_idx = 0  # reset fallback rotation for each video render
+    _vis._fallback_idx = 0   # reset fallback rotation for each video render
+    _vis._query_slots = {}   # reset slot counters so repeated queries get different clips
+
+    n_shots = len(storyboard)
     segment_paths = []
+    orig_durations = []      # original shot durations (for xfade offset math)
     clip_count = 0
 
     for i, shot in enumerate(storyboard):
         color_rgb = _SLIDE_COLORS[i % len(_SLIDE_COLORS)]
         dur = shot["duration_hint_sec"]
+        orig_durations.append(dur)
         caption = shot.get("narration_excerpt", "")
-        seg_path = str(media_dir / f"shot_{i:02d}.mp4")
         query = shot.get("stock_query", "")
+        seg_path = str(media_dir / f"shot_{i:02d}.mp4")
+
+        # Last segment encoded longer to compensate for cumulative xfade overlap:
+        # total reduction = (n-1)*_XFADE_DUR; adding it to the last shot keeps
+        # total video duration == sum(orig_durations) == ~voice audio duration.
+        encode_dur = dur + (n_shots - 1) * _XFADE_DUR if i == n_shots - 1 else dur
 
         # --- Attempt 1: Pexels video clip ---
         clip_path = media_dir / f"clip_{i:02d}.mp4"
@@ -315,7 +347,7 @@ def _render_local(config, storyboard, audio_path, odir):
 
         have_clip = _pexels_video_download(query, clip_path)
         if have_clip:
-            ok, err = _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path)
+            ok, err = _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, encode_dur, seg_path)
             if ok:
                 clip_count += 1
                 segment_paths.append(seg_path)
@@ -331,17 +363,13 @@ def _render_local(config, storyboard, audio_path, odir):
         else:
             _make_slide(int(w), int(h), color_rgb, caption, png_path)
 
-        ok, err = _encode_photo_segment(ffmpeg, png_path, w, h, fps, dur, seg_path)
+        ok, err = _encode_photo_segment(ffmpeg, png_path, w, h, fps, encode_dur, seg_path)
         if not ok:
             util.log("assemble", f"photo encode failed shot {i}: {err[-120:]}")
             return False
         segment_paths.append(seg_path)
 
     util.log("assemble", f"shots encoded: {len(segment_paths)} total, {clip_count} video clips")
-
-    # Write concat list
-    concat_list = media_dir / "concat.txt"
-    concat_list.write_text("\n".join(f"file '{p}'" for p in segment_paths), encoding="utf-8")
 
     # Generate lofi ambient piano background music (numpy, zero copyright, YouTube safe)
     total_dur = sum(s["duration_hint_sec"] for s in storyboard)
@@ -350,37 +378,33 @@ def _render_local(config, storyboard, audio_path, odir):
     have_music = music_path.exists() and music_path.stat().st_size > 1000
 
     out_path = str(odir / "final.mp4")
+    n_actual = len(segment_paths)
+    voice_idx = n_actual
+    music_idx = n_actual + 1
+
+    # Build xfade filter_complex for smooth crossfade transitions
+    filter_complex, v_out, a_out = _build_xfade_filter(
+        n_actual, orig_durations[:n_actual], voice_idx, music_idx, have_music
+    )
+
+    # All segments + voice + music as separate inputs (xfade requires individual files)
+    inputs = []
+    for p in segment_paths:
+        inputs += ["-i", p]
+    inputs += ["-i", audio_path]
     if have_music:
-        # -c:v copy: segments are already H.264; no re-encode needed, saves ~90 s.
-        # loudnorm: normalize voice to -16 LUFS (YouTube speech recommendation).
-        # normalize=0 on amix: prevents ffmpeg halving both streams by default.
-        cmd = [
-            ffmpeg, "-y",
-            "-f", "concat", "-safe", "0", "-i", str(concat_list),
-            "-i", audio_path,
-            "-i", str(music_path),
-            "-filter_complex",
-            "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[voice];[2:a]volume=0.15[music];"
-            "[voice][music]amix=inputs=2:duration=first:normalize=0[audio]",
-            "-map", "0:v", "-map", "[audio]",
-            "-c:v", "copy",
-            "-c:a", "aac", "-b:a", "192k",
-            "-shortest", out_path,
-        ]
-    else:
-        cmd = [
-            ffmpeg, "-y",
-            "-f", "concat", "-safe", "0", "-i", str(concat_list),
-            "-i", audio_path,
-            "-filter_complex", "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11[audio]",
-            "-map", "0:v", "-map", "[audio]",
-            "-c:v", "copy",
-            "-c:a", "aac", "-b:a", "192k",
-            "-shortest", out_path,
-        ]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+        inputs += ["-i", str(music_path)]
+
+    cmd = [ffmpeg, "-y"] + inputs + [
+        "-filter_complex", filter_complex,
+        "-map", v_out, "-map", a_out,
+        "-c:v", "libx264", "-crf", "22", "-preset", "fast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest", out_path,
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if r.returncode != 0:
-        util.log("assemble", f"ffmpeg concat error: {r.stderr[-300:]}")
+        util.log("assemble", f"ffmpeg xfade error: {r.stderr[-400:]}")
         return False
     util.log("assemble", f"rendered -> {out_path} (music={'yes' if have_music else 'no'})")
     return True

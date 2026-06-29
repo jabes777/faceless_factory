@@ -147,6 +147,7 @@ _VIDEO_FALLBACKS = [
     "woman reviewing documents stressed desk",
 ]
 _fallback_idx = 0
+_query_slots: dict = {}  # {cache_key_base: next_slot} — rotated per render for clip variety
 
 
 def _english_video_query(keywords, shot_index=0):
@@ -198,9 +199,12 @@ def _pexels_download(query, dest_path, orientation="landscape"):
 
 
 def _pexels_video_download(query, dest_path):
-    """Download one Pexels video clip (SD quality) for the given query.
+    """Download a Pexels video clip for the given query.
 
-    Uses a global cache keyed by query hash so repeated topics don't re-download.
+    Uses a per-render slot counter so repeated queries within the same video get
+    DIFFERENT clips (slot 0, 1, 2 …) instead of the same cached clip every time.
+    Cache is keyed {hash}_{slot}.mp4 so all slots persist across runs.
+
     License: Pexels Free License — royalty-free, commercial use OK, YouTube monetizable.
     Returns True on success.
     """
@@ -208,27 +212,33 @@ def _pexels_video_download(query, dest_path):
     if not key:
         return False
 
-    # Check global cache first — keyed on the ENGLISH video query so cache is query-specific
     _CLIP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    eq_for_cache = _english_video_query(query.split())
-    cache_key = hashlib.md5(eq_for_cache.lower().encode()).hexdigest()[:10]
-    cached = _CLIP_CACHE_DIR / f"{cache_key}.mp4"
+
+    # Resolve English query ONCE to avoid double-incrementing the fallback index
+    eq = _english_video_query(query.split())
+    cache_key_base = hashlib.md5(eq.lower().encode()).hexdigest()[:10]
+
+    # Advance the slot for this query so the next call gets a different clip
+    slot = _query_slots.get(cache_key_base, 0)
+    _query_slots[cache_key_base] = slot + 1
+
+    cached = _CLIP_CACHE_DIR / f"{cache_key_base}_{slot}.mp4"
     if cached.exists() and cached.stat().st_size > 50_000:
         import shutil as _sh
         _sh.copy2(str(cached), str(dest_path))
+        util.log("visuals", f"  clip (cached s{slot}): '{eq}'")
         return True
 
     try:
         import requests
-        eq = _english_video_query(query.split())
-        util.log("visuals", f"  clip: '{query}' → '{eq}'")
+        util.log("visuals", f"  clip: '{query}' → '{eq}' (slot {slot})")
         headers = {
             "Authorization": key,
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
         r = requests.get(
             "https://api.pexels.com/videos/search",
-            params={"query": eq, "per_page": 5, "size": "medium"},
+            params={"query": eq, "per_page": 15, "size": "medium"},
             headers=headers, timeout=15,
         )
         r.raise_for_status()
@@ -236,39 +246,50 @@ def _pexels_video_download(query, dest_path):
         if not videos:
             return False
 
-        # Prefer 5-20 s clips (loop cleanly); pick smallest SD file to stay fast
+        # Score by duration preference (5-20 s loops cleanly)
         def _score(v):
             dur = v.get("duration", 0)
             return 2 if 5 <= dur <= 20 else (1 if dur > 20 else 0)
         videos.sort(key=_score, reverse=True)
 
-        for video in videos:
-            files = video.get("video_files", [])
-            # Prefer ~720p (width ≈ 1280) — looks sharp when upscaled to 1080p while
-            # keeping download fast. Avoid 4K (unnecessary) and sub-480p (blurry).
-            candidates = [f for f in files if 640 <= f.get("width", 0) <= 1920]
-            if not candidates:
-                candidates = [f for f in files if f.get("width", 0) >= 480]
-            if not candidates:
-                continue
-            candidates.sort(key=lambda f: abs(f.get("width", 0) - 1280))
-            url = candidates[0]["link"]  # closest to 720p
-            resp = requests.get(url, headers={"User-Agent": headers["User-Agent"]},
-                                timeout=60, stream=True)
-            resp.raise_for_status()
-            tmp = Path(str(dest_path) + ".tmp")
-            with open(str(tmp), "wb") as f:
-                for chunk in resp.iter_content(chunk_size=65536):
-                    f.write(chunk)
-            if tmp.stat().st_size < 50_000:
-                tmp.unlink()
-                continue
-            tmp.rename(dest_path)
-            import shutil as _sh
-            _sh.copy2(str(dest_path), str(cached))  # populate cache
-            return True
+        # Pick the slot-th video (wraps around if fewer results than slots used)
+        target = videos[slot % len(videos)]
 
-        return False
+        def _best_file(vid):
+            files = vid.get("video_files", [])
+            cands = [f for f in files if 640 <= f.get("width", 0) <= 1920]
+            if not cands:
+                cands = [f for f in files if f.get("width", 0) >= 480]
+            if not cands:
+                return None
+            cands.sort(key=lambda f: abs(f.get("width", 0) - 1280))
+            return cands[0]["link"]
+
+        url = _best_file(target)
+        if not url:
+            # Slot video has no usable file; scan other results
+            for alt in videos:
+                url = _best_file(alt)
+                if url:
+                    break
+        if not url:
+            return False
+
+        resp = requests.get(url, headers={"User-Agent": headers["User-Agent"]},
+                            timeout=60, stream=True)
+        resp.raise_for_status()
+        tmp = Path(str(dest_path) + ".tmp")
+        with open(str(tmp), "wb") as f:
+            for chunk in resp.iter_content(chunk_size=65536):
+                f.write(chunk)
+        if tmp.stat().st_size < 50_000:
+            tmp.unlink()
+            return False
+        tmp.rename(dest_path)
+        import shutil as _sh
+        _sh.copy2(str(dest_path), str(cached))  # populate cache slot
+        return True
+
     except Exception as e:
         util.log("visuals", f"Pexels video failed for '{query}': {e}")
         return False
@@ -282,8 +303,8 @@ def generate(config, script_text, topic=None):
     storyboard = []
     for i, seg in enumerate(segs):
         kw = _keywords(seg)
-        # Topic keywords lead so _english_video_query() tries them first
-        combined = list(dict.fromkeys(topic_kw + kw))[:4]
+        # Paragraph keywords lead (topic-specific); topic_kw are fallback for generic paragraphs
+        combined = list(dict.fromkeys(kw + topic_kw))[:4]
         storyboard.append({
             "shot": i + 1,
             "narration_excerpt": seg[:120] + ("…" if len(seg) > 120 else ""),
