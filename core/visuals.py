@@ -15,13 +15,91 @@ from . import util
 # Global clip cache — shared across all videos so the same query isn't re-downloaded
 _CLIP_CACHE_DIR = Path.home() / ".cache" / "faceless_factory" / "pexels_clips"
 
-# English search terms that return better Pexels results than Spanish keywords
+# Photo queries — descriptive nouns for static Pexels images
 _QUERY_MAP = {
-    "dinero": "money", "deuda": "debt", "ahorro": "savings", "familia": "family",
-    "presupuesto": "budget", "trabajo": "work", "mujer": "woman", "latina": "latina woman",
-    "dios": "faith prayer", "iglesia": "church", "casa": "house home", "niños": "children",
-    "ansiedad": "anxiety stress", "paz": "peace calm", "negocio": "business entrepreneur",
-    "tarjeta": "credit card", "banco": "bank", "ingreso": "income salary",
+    "dinero": "woman budgeting home", "deuda": "person stressed bills", "ahorro": "woman saving money",
+    "familia": "latin family kitchen", "presupuesto": "budget notebook planning", "trabajo": "woman laptop professional",
+    "mujer": "confident latina woman", "latina": "latina woman professional", "dios": "woman hands prayer",
+    "iglesia": "church community worship", "casa": "family home warm interior", "niños": "mother children home",
+    "ansiedad": "woman stressed anxiety", "paz": "woman peaceful calm", "negocio": "woman entrepreneur business",
+    "tarjeta": "credit card payment", "banco": "woman banking online", "ingreso": "paycheck salary woman",
+    "pareja": "couple discussing serious", "esposo": "couple conversation home", "hijos": "mother children homework",
+    "fe": "woman faith prayer hope", "diezmo": "church offering giving", "gastos": "woman reviewing bills",
+    "emergencia": "family savings emergency", "inversión": "woman financial planning", "meta": "woman goal writing",
+    "crédito": "credit score financial woman", "salario": "woman paycheck work", "deudas": "woman eliminating debt",
+    "pagos": "person paying bills phone", "herencia": "family legacy values", "divorcio": "strong woman rebuilding",
+    "estrés": "woman stress relief breathe", "culpa": "woman reflection thinking", "prosperidad": "woman success thriving",
+    "miedo": "woman courage confident", "cambiar": "woman transformation growth", "hablar": "women conversation talking",
+    "pedir": "family difficult conversation", "libertad": "woman free happy confident", "valores": "family faith values",
+    "cónyuge": "couple finances discussion", "salir": "woman walking determined", "construir": "woman building future",
+    "oración": "woman praying kneeling", "efectivo": "woman paying cash", "hábitos": "woman journaling habits",
+    "ingreso": "woman income paycheck", "ingresos": "woman multiple income streams",
+}
+
+# Video queries — ACTION-ORIENTED phrases (subject + verb + object) that return relevant motion clips
+# Pexels video search needs human subjects doing something, not abstract nouns.
+_VIDEO_QUERY_MAP = {
+    # Finance / money actions
+    "dinero": "woman counting money table",
+    "deuda": "person stressed paperwork bills debt",
+    "ahorro": "woman putting money piggy bank saving",
+    "presupuesto": "person writing budget notebook planning",
+    "gastos": "woman tracking expenses notebook pen",
+    "facturas": "woman reviewing bills laptop kitchen",
+    "pagos": "person paying bills online phone",
+    "tarjeta": "woman using credit card payment",
+    "banco": "woman banking phone online transaction",
+    "inversión": "woman financial charts laptop investment",
+    "crédito": "woman phone checking credit score app",
+    "salario": "woman paycheck work desk salary",
+    "ingreso": "woman receiving payment work income",
+    "ingresos": "woman managing multiple income streams",
+    "emergencia": "family planning emergency savings jar",
+    "meta": "woman writing goals vision journal",
+    "deudas": "woman cutting credit card debt free",
+    "efectivo": "woman paying cash envelope budget",
+    "hábitos": "woman journaling morning routine habits",
+    # Family / relationships
+    "familia": "latin family talking kitchen table",
+    "pareja": "couple discussing finances home table",
+    "esposo": "couple serious conversation living room",
+    "hijos": "mother teaching children homework table",
+    "niños": "children playing home family kitchen",
+    "cónyuge": "couple disagreement talking kitchen calm",
+    "herencia": "family sitting together discussion living room",
+    "divorcio": "strong woman walking confident outdoors",
+    # Faith / spiritual
+    "dios": "woman praying hands bowed head",
+    "fe": "woman hands folded prayer faith",
+    "iglesia": "church service congregation worship singing",
+    "diezmo": "person placing donation church offering",
+    "oración": "woman kneeling prayer bedroom morning",
+    "biblia": "woman reading bible morning light",
+    "valores": "family around table talking faith",
+    # Emotional / psychological
+    "ansiedad": "woman anxious stressed holding head hands",
+    "paz": "woman eyes closed peaceful calm nature",
+    "estrés": "woman breathing deeply stress relief calm",
+    "culpa": "woman looking down thoughtful reflection",
+    "miedo": "woman looking up smiling brave confident",
+    "prosperidad": "woman celebrating success arms raised happy",
+    "libertad": "woman walking free outdoors smiling confident",
+    "cambiar": "woman determined walking forward transformation",
+    # Work / career
+    "trabajo": "woman working laptop coffee shop professional",
+    "negocio": "latina woman entrepreneur small business store",
+    "mujer": "confident latina woman professional standing",
+    "latina": "latina woman smiling professional confident",
+    # Home / goals
+    "casa": "family home warm living room",
+    "hogar": "cozy family home kitchen cooking",
+    "salir": "woman walking outdoors morning determined",
+    "empezar": "woman opening notebook pen fresh start",
+    # Conversation / communication
+    "hablar": "two women talking coffee serious conversation",
+    "pedir": "woman uncomfortable asking money family",
+    "prestado": "family awkward money conversation table",
+    "construir": "woman building future vision confident",
 }
 
 
@@ -38,10 +116,54 @@ def _keywords(paragraph):
 
 
 def _english_query(keywords):
+    """Photo query: returns first matching phrase from _QUERY_MAP."""
     for kw in keywords:
         if kw in _QUERY_MAP:
             return _QUERY_MAP[kw]
     return " ".join(keywords[:2])
+
+
+# Rotating fallback pool — visually relevant to faith+finance content, always return Pexels results
+_VIDEO_FALLBACKS = [
+    "latina woman writing notebook morning",
+    "woman reviewing financial documents home",
+    "woman praying hands bowed head",
+    "latin family kitchen table talking",
+    "woman walking outdoors confident morning",
+    "woman looking at phone smiling plan",
+    "couple discussing plans kitchen table",
+    "woman journaling coffee morning routine",
+    "latina woman professional smiling office",
+    "woman counting cash envelope budget",
+    "mother children laughing home family",
+    "woman closing eyes breathing peaceful",
+    "woman opening bible reading morning",
+    "person writing goals journal desk",
+    "woman holding coffee thinking window",
+    "latina woman entrepreneur laptop working",
+    "woman calculating budget kitchen table",
+    "family prayer hands together home",
+    "woman determined walking street confident",
+    "woman reviewing documents stressed desk",
+]
+_fallback_idx = 0
+
+
+def _english_video_query(keywords, shot_index=0):
+    """Video query: action-oriented phrase from _VIDEO_QUERY_MAP.
+
+    Pexels video search works best with 'person doing something' phrases.
+    Tries each keyword against the map; if nothing matches, cycles through
+    a curated fallback pool of always-relevant queries for this channel.
+    """
+    global _fallback_idx
+    for kw in keywords:
+        if kw in _VIDEO_QUERY_MAP:
+            return _VIDEO_QUERY_MAP[kw]
+    # Cycle through fallbacks so consecutive unmatched shots get variety
+    q = _VIDEO_FALLBACKS[_fallback_idx % len(_VIDEO_FALLBACKS)]
+    _fallback_idx += 1
+    return q
 
 
 def _pexels_download(query, dest_path, orientation="landscape"):
@@ -86,9 +208,10 @@ def _pexels_video_download(query, dest_path):
     if not key:
         return False
 
-    # Check global cache first
+    # Check global cache first — keyed on the ENGLISH video query so cache is query-specific
     _CLIP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_key = hashlib.md5(query.lower().encode()).hexdigest()[:10]
+    eq_for_cache = _english_video_query(query.split())
+    cache_key = hashlib.md5(eq_for_cache.lower().encode()).hexdigest()[:10]
     cached = _CLIP_CACHE_DIR / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 50_000:
         import shutil as _sh
@@ -97,7 +220,8 @@ def _pexels_video_download(query, dest_path):
 
     try:
         import requests
-        eq = _english_query(query.split())
+        eq = _english_video_query(query.split())
+        util.log("visuals", f"  clip: '{query}' → '{eq}'")
         headers = {
             "Authorization": key,
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

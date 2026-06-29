@@ -184,10 +184,10 @@ def _generate_lofi_music(duration_sec, out_path, ffmpeg_bin):
         audio[:fi] *= np.linspace(0.0, 1.0, fi)
         audio[-fo:] *= np.linspace(1.0, 0.0, fo)
 
-        # Normalize to −14 dBFS (leaves headroom for mixing under voice)
+        # Normalize to −3 dBFS so the MP3 is loud; volume control happens in amix
         peak = np.max(np.abs(audio))
         if peak > 0:
-            audio = audio / peak * 0.20
+            audio = audio / peak * 0.70
 
         # Write 16-bit mono WAV, then convert to MP3 with ffmpeg
         tmp_wav = Path(str(out_path)).with_suffix(".wav")
@@ -287,6 +287,8 @@ def _render_local(config, storyboard, audio_path, odir):
     media_dir.mkdir(exist_ok=True)
 
     from core.visuals import _pexels_download, _pexels_video_download
+    import core.visuals as _vis
+    _vis._fallback_idx = 0  # reset fallback rotation for each video render
     segment_paths = []
     clip_count = 0
 
@@ -340,15 +342,16 @@ def _render_local(config, storyboard, audio_path, odir):
 
     out_path = str(odir / "final.mp4")
     if have_music:
-        # Mix voice (100%) + lofi music (12%) — clearly audible but never competes with voice
+        # Mix voice (100%) + lofi music (15%).
+        # normalize=0 prevents amix from silently halving both streams.
         cmd = [
             ffmpeg, "-y",
             "-f", "concat", "-safe", "0", "-i", str(concat_list),
             "-i", audio_path,
             "-i", str(music_path),
             "-filter_complex",
-            "[1:a]volume=1.0[voice];[2:a]volume=0.12[music];"
-            "[voice][music]amix=inputs=2:duration=first[audio]",
+            "[1:a]volume=1.0[voice];[2:a]volume=0.15[music];"
+            "[voice][music]amix=inputs=2:duration=first:normalize=0[audio]",
             "-map", "0:v", "-map", "[audio]",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
