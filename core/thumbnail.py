@@ -44,7 +44,13 @@ def _make_thumbnail_png(title, overlay_text, bg_path, out_path):
 
     if bg_path and Path(bg_path).exists():
         img = Image.open(str(bg_path)).convert("RGB")
-        img = img.resize((_W, _H), Image.LANCZOS)
+        # Scale-to-cover: preserve aspect ratio, center-crop excess (no stretching)
+        src_w, src_h = img.size
+        scale = max(_W / src_w, _H / src_h)
+        nw, nh = int(src_w * scale), int(src_h * scale)
+        img = img.resize((nw, nh), Image.LANCZOS)
+        left, top = (nw - _W) // 2, (nh - _H) // 2
+        img = img.crop((left, top, left + _W, top + _H))
         img = ImageEnhance.Brightness(img).enhance(0.28)
         # Full vignette: dark edges, slightly lighter center
         overlay = Image.new("RGBA", (_W, _H), (0, 0, 0, 0))

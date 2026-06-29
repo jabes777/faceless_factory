@@ -207,10 +207,17 @@ def _annotate_image(draw, width, height, caption, **overlay):
 # ---------------------------------------------------------------------------
 
 def _make_slide_photo(width, height, photo_path, caption, out_path, **overlay):
-    """Real photo bg + all text overlays."""
+    """Real photo bg + all text overlays. Uses scale-to-cover + center crop to avoid stretching."""
     from PIL import Image, ImageDraw, ImageEnhance
     img = Image.open(str(photo_path)).convert("RGBA")
-    img = img.resize((width, height), Image.LANCZOS)
+    # Scale to COVER (preserve aspect ratio, crop the excess to center)
+    src_w, src_h = img.size
+    scale = max(width / src_w, height / src_h)
+    new_w, new_h = int(src_w * scale), int(src_h * scale)
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    left = (new_w - width) // 2
+    top = (new_h - height) // 2
+    img = img.crop((left, top, left + width, top + height))
     # Slight darken at the bottom for subtitle legibility
     gradient = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     gd = ImageDraw.Draw(gradient)
@@ -438,7 +445,10 @@ def _encode_clip_segment(ffmpeg, clip_path, sub_png, w, h, fps, dur, seg_path):
         "-i", str(sub_png),
         "-filter_complex",
         (
-            f"[0:v]scale={w}:{h},setsar=1[bg];"
+            # scale-to-cover: enlarge until both dimensions fill the frame, then
+            # center-crop — preserves aspect ratio, never stretches/squishes
+            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},setsar=1[bg];"
             f"[1:v]format=rgba[sub];"
             f"[bg][sub]overlay=0:0[v]"
         ),
